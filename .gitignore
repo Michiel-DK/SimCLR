@@ -7,3 +7,5 @@ build/
 dist/
 simclr.egg-info
 lightning_logs/
+data_tar/
+.python-version
