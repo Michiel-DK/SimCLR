@@ -8,6 +8,7 @@ import numpy as np
 from simclr import SimCLR
 from simclr.modules import LogisticRegression, get_resnet
 from simclr.modules.transformations import TransformsSimCLR
+from simclr.modules.fish_dataset import ImageMaskDataset
 
 from utils import yaml_config_hook
 
@@ -144,8 +145,20 @@ if __name__ == "__main__":
             download=True,
             transform=TransformsSimCLR(size=args.image_size).test_transform,
         )
+    elif args.dataset == 'FISH':
+        train_dataset = ImageMaskDataset(
+                bucket_name = args.bucket_name, 
+                image_size=args.image_size,
+                train=True,
+                transform = TransformsSimCLR(size=args.image_size).test_transform)
+            
+        test_dataset = ImageMaskDataset(
+                bucket_name = args.bucket_name, 
+                image_size=args.image_size,
+                train=False,
+                transform = TransformsSimCLR(size=args.image_size).test_transform)
     else:
-        raise NotImplementedError
+            raise NotImplementedError
 
     train_loader = torch.utils.data.DataLoader(
         train_dataset,

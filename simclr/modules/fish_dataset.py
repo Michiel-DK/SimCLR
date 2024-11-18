@@ -10,10 +10,10 @@ import random
 import shutil
 
 class ImageMaskDataset(VisionDataset):
-    def __init__(self, bucket_name, train=True, split_percentage=0.8, seed=42, transform=None, image_size=224, tar_prefix='data_tar/fish_data.tar.gz', download=False):
+    def __init__(self, bucket_name, split_type='train', train_percentage=0.5, val_percentage=0.3, seed=42, transform=None, image_size=224, tar_prefix='data_tar/fish_data.tar.gz', download=False):
         super(ImageMaskDataset, self).__init__(root='data/', transform=transform)
         
-        self.train = train
+        self.split_type = split_type
         self.download = download
         self.tar_prefix = tar_prefix
         self.local_tar_path = os.path.join(self.root, 'fish_data.tar.gz')
@@ -43,7 +43,7 @@ class ImageMaskDataset(VisionDataset):
         self.labels = [self.class_to_idx[self._extract_class_name_from_path(path)] for path in self.image_paths]
         
         # Split data into train and validation sets
-        self._split_data(split_percentage, seed)
+        self._split_data(train_percentage, val_percentage, seed)
 
         # Define a default transform if none is provided
         self.transform = transform or transforms.Compose([
@@ -86,10 +86,10 @@ class ImageMaskDataset(VisionDataset):
 
         # Debug: Print the complete directory structure after extraction
         print("Complete directory structure after extraction:")
-        for root, dirs, files in os.walk(self.root):
-            print(f"Directory: {root}")
-            print(f"Subdirectories: {dirs}")
-            print(f"Files: {files}")
+        # for root, dirs, files in os.walk(self.root):
+        #     print(f"Directory: {root}")
+        #     print(f"Subdirectories: {dirs}")
+        #     print(f"Files: {files}")
 
         # Handle nested directories (e.g., 'data_tar/Sea Bass/Sea Bass/')
         for class_name in os.listdir(self.root):
@@ -123,7 +123,7 @@ class ImageMaskDataset(VisionDataset):
                 if file_name.endswith(('.jpg', '.jpeg', '.png')):
                     image_path = os.path.join(root, file_name)
                     local_image_paths.append(image_path)
-                    print(f"Found image: {image_path}")
+                    #print(f"Found image: {image_path}")
 
         print(f"Found {len(local_image_paths)} images excluding GT directories.")
         return local_image_paths
@@ -134,8 +134,7 @@ class ImageMaskDataset(VisionDataset):
         # Extracts class name from directory structure, assuming format "data/class_name/image.jpg"
         return os.path.basename(os.path.dirname(path))
 
-    def _split_data(self, split_percentage, seed):
-        # Shuffle and split indices based on the split percentage and seed
+    def _split_data(self, train_percentage, val_percentage, seed):
         total_size = len(self.image_paths)
         if total_size == 0:
             raise ValueError("Dataset has no images. Check your local 'data/' directory.")
@@ -144,14 +143,19 @@ class ImageMaskDataset(VisionDataset):
         random.seed(seed)
         random.shuffle(indices)
         
-        split_idx = int(total_size * split_percentage)
+        train_split_idx = int(total_size * train_percentage)
+        val_split_idx = train_split_idx + int(total_size * val_percentage)
         
-        if self.train:
-            self.indices = indices[:split_idx]  # Training data
+        if self.split_type == 'train':
+            self.indices = indices[:train_split_idx]
+        elif self.split_type == 'val':
+            self.indices = indices[train_split_idx:val_split_idx]
+        elif self.split_type == 'test':
+            self.indices = indices[val_split_idx:]
         else:
-            self.indices = indices[split_idx:]  # Validation/Test data
+            raise ValueError("Invalid split_type. Choose from 'train', 'val', or 'test'.")
         
-        print(f"{'Training' if self.train else 'Validation'} split has {len(self.indices)} samples.")
+        print(f"{self.split_type.capitalize()} split has {len(self.indices)} samples.")
 
     def __len__(self):
         return len(self.indices)
@@ -165,7 +169,13 @@ class ImageMaskDataset(VisionDataset):
         label = self.labels[real_idx]
 
         # Load image from local
-        image = Image.open(img_path).convert('RGB')
+        try:
+            # Attempt to open the image
+            image = Image.open(img_path).convert('RGB')
+        except (SyntaxError, OSError) as e:
+            print(f"Warning: Skipping corrupted image file {img_path}. Error: {e}")
+            # Skip this index by returning the next valid item
+            return self.__getitem__((idx + 1) % len(self.indices))
         
         # Apply resizing transform
         if self.transform:
@@ -176,9 +186,12 @@ class ImageMaskDataset(VisionDataset):
 
 # Example usage:
 if __name__ == '__main__':
-    train_dataset = ImageMaskDataset(bucket_name="fish-dataset-cl", train=True, split_percentage=0.8, seed=42, image_size=96, tar_prefix='data_tar/fish_data.tar.gz', download=False)
-    val_dataset = ImageMaskDataset(bucket_name="fish-dataset-cl", train=False, split_percentage=0.8, seed=42, image_size=96, tar_prefix='data_tar/fish_data.tar.gz', download=False)
+    train_dataset = ImageMaskDataset(bucket_name='fish-dataset-cl', split_type='train', train_percentage=0.7, val_percentage=0.15, seed=42, image_size=96, tar_prefix='data_tar/fish_data.tar.gz', download=False)
+    val_dataset = ImageMaskDataset(bucket_name='fish-dataset-cl', split_type='val', train_percentage=0.7, val_percentage=0.15, seed=42, image_size=96, tar_prefix='data_tar/fish_data.tar.gz', download=False)
+    test_dataset = ImageMaskDataset(bucket_name='fish-dataset-cl', split_type='test', train_percentage=0.7, val_percentage=0.15, seed=42, image_size=96, tar_prefix='data_tar/fish_data.tar.gz', download=False)
+
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=32, shuffle=True)
-    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=32, shuffle=False)
+    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=32, shuffle=True)
+    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=32, shuffle=False)
         
     import ipdb;ipdb.set_trace()
