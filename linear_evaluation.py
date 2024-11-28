@@ -79,6 +79,34 @@ def create_data_loaders_from_arrays(X_train, y_train, X_test, y_test, X_val, y_v
     
     else:
         return train_loader, test_loader
+    
+def train_one_epoch(args, train_loader, model, criterion, optimizer):
+    model.train()
+    loss_epoch = 0
+    accuracy_epoch = 0
+    for step, (x, y) in enumerate(train_loader):
+        optimizer.zero_grad()
+
+        x = x.to(args.device)
+        y = y.to(args.device)
+
+        output = model(x)
+        loss = criterion(output, y)
+
+        predicted = output.argmax(1)
+        acc = (predicted == y).sum().item() / y.size(0)
+        accuracy_epoch += acc
+
+        loss.backward()
+        optimizer.step()
+
+        loss_epoch += loss.item()
+
+    # Average metrics
+    loss_epoch /= len(train_loader)
+    accuracy_epoch /= len(train_loader)
+
+    return loss_epoch, accuracy_epoch
 
 
 def train(args, train_loader, val_loader, model, criterion, optimizer, scheduler):
@@ -229,6 +257,7 @@ if __name__ == "__main__":
         else:
             raise NotImplementedError
 
+        assert set(train_dataset).isdisjoint(set(val_dataset)), "Train and validation sets overlap!"
 
         train_loader = torch.utils.data.DataLoader(
             train_dataset,
@@ -311,51 +340,50 @@ if __name__ == "__main__":
                 X_val=val_X, y_val=val_y, batch_size=args.logistic_batch_size
             )
             
-            # Initialize EarlyStopping
-            early_stopping = EarlyStopping(patience=args.logistic_patience, verbose=True)
+            # EarlyStopping and best_val_loss initialization
+        early_stopping = EarlyStopping(patience=args.logistic_patience, verbose=True)
+        best_val_loss = float('inf')
 
-            best_val_loss = float('inf')
+        # Main epoch loop
+        for epoch in range(args.logistic_epochs):
+            print(f"Epoch {epoch+1}/{args.logistic_epochs}")
 
-            for epoch in range(args.logistic_epochs):
-                
-                loss_epoch, accuracy_epoch = train(
-                    args, arr_train_loader, arr_val_loader, model, criterion, optimizer, scheduler
-                )
+            # Training step
+            train_loss, train_accuracy = train_one_epoch(args, arr_train_loader, model, criterion, optimizer)
 
-                # Validation step
-                val_loss, val_accuracy = validate(arr_val_loader, model, criterion, args.device)
+            # Validation step
+            val_loss, val_accuracy = validate(arr_val_loader, model, criterion, args.device)
 
-                # Check for improvement in validation loss using EarlyStopping
-                early_stopping(val_loss)
+            # Check early stopping
+            early_stopping(val_loss)
+            if early_stopping.early_stop:
+                print(f"Early stopping triggered at epoch {epoch+1}.")
+                break
 
-                # Save the best model
-                if val_loss < best_val_loss:
-                    best_val_loss = val_loss
-                    print(f'model saved on epoch {epoch}')
-                    torch.save(model.state_dict(), "logistic_finetuned.pth")
+            # Save the best model
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                print(f"Model saved at epoch {epoch+1}")
+                torch.save(model.state_dict(), "logistic_finetuned.pth")
 
-                # Logging training and validation metrics
-                print(
-                    f"Epoch [{epoch+1}/{args.logistic_epochs}]\t"
-                    f"Train Loss: {loss_epoch / len(arr_train_loader):.4f}\t Train Accuracy: {accuracy_epoch / len(arr_train_loader):.4f}\t"
-                    f"Val Loss: {val_loss:.4f}\t Val Accuracy: {val_accuracy:.4f}"
-                )
-
-                # Check for early stopping
-                if early_stopping.early_stop:
-                    print(f"Early stopping triggered at epoch {epoch+1}.")
-                    break
-
-            # Load the best model for final testing
-            model.load_state_dict(torch.load("logistic_finetuned.pth"))
-
-            # Final testing
-            loss_epoch, accuracy_epoch = test(
-                args, arr_test_loader, simclr_model, model, criterion, optimizer
-            )
+            # Logging
             print(
-                f"[FINAL]\t Loss: {loss_epoch / len(arr_test_loader):.4f}\t Accuracy: {accuracy_epoch / len(arr_test_loader):.4f}"
+                f"Epoch [{epoch+1}/{args.logistic_epochs}] "
+                f"Train Loss: {train_loss:.4f}, Train Accuracy: {train_accuracy:.4f}\t"
+                f"Val Loss: {val_loss:.4f}, Val Accuracy: {val_accuracy:.4f}"
             )
+
+        # Load the best model for final testing
+        model.load_state_dict(torch.load("logistic_finetuned.pth"))
+
+        # Final testing
+        loss_epoch, accuracy_epoch = test(
+            args, arr_test_loader, simclr_model, model, criterion, optimizer
+        )
+        print(
+            f"[FINAL]\t Loss: {loss_epoch / len(arr_test_loader):.4f}\t Accuracy: {accuracy_epoch / len(arr_test_loader):.4f}"
+        )
+        
     except Exception as e:
             import ipdb, traceback, sys
             extype, value, tb = sys.exc_info()
