@@ -5,11 +5,61 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms, models
 from tqdm import tqdm
-from simclr.modules.fish_dataset import ImageMaskDataset
+from simclr.modules.dataloader_transform import ImageMaskDataset
 from simclr.args import get_args
 import os
+from simclr.modules.transformations import TransformsSimCLR
+
 
 args = get_args()
+
+class EarlyStopping:
+    def __init__(self, patience=10, delta=1e-4, path='checkpoint.pth', verbose=False):
+        """
+        Args:
+            patience (int): How long to wait after last time validation loss improved.
+            delta (float): Minimum change in the monitored quantity to qualify as an improvement.
+            path (str): Path to save the model checkpoint.
+            verbose (bool): Print messages for early stopping events.
+        """
+        self.patience = patience
+        self.delta = delta
+        self.path = path
+        self.verbose = verbose
+        self.counter = 0
+        self.best_loss = None
+        self.early_stop = False
+
+    def __call__(self, val_loss, model, optimizer, scheduler, epoch):
+        if self.best_loss is None:
+            self.best_loss = val_loss
+            self.save_checkpoint(val_loss, model, optimizer, scheduler, epoch)
+        elif val_loss > self.best_loss - self.delta:
+            self.counter += 1
+            if self.verbose:
+                print(f"EarlyStopping counter: {self.counter} out of {self.patience}")
+            if self.counter >= self.patience:
+                self.early_stop = True
+        else:
+            self.best_loss = val_loss
+            self.save_checkpoint(val_loss, model, optimizer, scheduler, epoch)
+            self.counter = 0
+
+    def save_checkpoint(self, val_loss, model, optimizer, scheduler, epoch):
+        """
+        Saves model when validation loss decreases.
+        """
+        checkpoint = {
+            'epoch': epoch,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'scheduler_state_dict': scheduler.state_dict(),
+            'loss': val_loss,
+        }
+        torch.save(checkpoint, self.path)
+        if self.verbose:
+            print(f"Validation loss decreased. Saving model to {self.path}")
+
 
 # Define the model
 class ResNet50LogisticRegression(nn.Module):
@@ -73,7 +123,6 @@ def train(model, train_loader, criterion, optimizer, device):
     return avg_loss
 
 # Evaluation function
-# Evaluation function
 def evaluate(model, loader, criterion, device, split_name="Validation"):
     model.eval()
     running_loss = 0.0
@@ -104,6 +153,9 @@ def main_training_loop(model, train_loader, val_loader, test_loader, criterion, 
     best_loss = float('inf')
     start_epoch = 0
 
+    # Initialize early stopping
+    early_stopping = EarlyStopping(patience=10, delta=1e-4, path=checkpoint_path, verbose=True)
+
     # Load checkpoint if available
     model, optimizer, scheduler, start_epoch, _ = load_checkpoint(checkpoint_path, model, optimizer, scheduler)
 
@@ -119,12 +171,18 @@ def main_training_loop(model, train_loader, val_loader, test_loader, criterion, 
         # Step the scheduler based on validation loss
         scheduler.step(val_loss)
 
-        # Save the model if validation loss improves
-        if val_loss < best_loss:
-            best_loss = val_loss
-            save_checkpoint(epoch, model, optimizer, scheduler, val_loss, checkpoint_path)
+        # Early stopping check
+        early_stopping(val_loss, model, optimizer, scheduler, epoch)
+
+        # Terminate if early stopping criterion is met
+        if early_stopping.early_stop:
+            print("Early stopping triggered. Ending training.")
+            break
 
         print(f"Epoch {epoch + 1} completed. Training Loss: {train_loss:.4f}, Validation Loss: {val_loss:.4f}, Validation Accuracy: {val_accuracy:.2f}%")
+
+    # Load the best model from early stopping checkpoint
+    model, optimizer, scheduler, _, _ = load_checkpoint(checkpoint_path, model, optimizer, scheduler)
 
     # Test phase after training completes
     print("Evaluating on Test Set:")
@@ -132,58 +190,59 @@ def main_training_loop(model, train_loader, val_loader, test_loader, criterion, 
     print(f"Test Loss: {test_loss:.4f}, Test Accuracy: {test_accuracy:.2f}%")
 
 
+
 if __name__ == '__main__':
     
-    # Dataset creation with split_type for train, validation, and test
     train_dataset = ImageMaskDataset(
-        bucket_name=args.bucket_name,
-        image_size=args.image_size,
-        split_type='train',
-        train_percentage=0.7,
-        val_percentage=0.15
-    )
+                    bucket_name = args.bucket_name,
+                    image_size=args.image_size,
+                    train=True,
+                    unlabeled=False,
+                    unlabeled_split_percentage=0.9,
+                    transform = TransformsSimCLR(size=args.image_size).test_transform)
 
     val_dataset = ImageMaskDataset(
-        bucket_name=args.bucket_name,
-        image_size=args.image_size,
-        split_type='val',
-        train_percentage=0.7,
-        val_percentage=0.15
-    )
+                    bucket_name = args.bucket_name,
+                    image_size=args.image_size,
+                    unlabeled=False,
+                    train=False,
+                    test=False,
+                    unlabeled_split_percentage=0.9,
+                    transform = TransformsSimCLR(size=args.image_size).test_transform)
 
     test_dataset = ImageMaskDataset(
-        bucket_name=args.bucket_name,
-        image_size=args.image_size,
-        split_type='test',
-        train_percentage=0.7,
-        val_percentage=0.15
-    )
+                    bucket_name = args.bucket_name,
+                    image_size=args.image_size,
+                    unlabeled=False,
+                    train=False,
+                    test=True,
+                    unlabeled_split_percentage=0.9,
+                    transform = TransformsSimCLR(size=args.image_size).test_transform)
+    
+    train_loader = torch.utils.data.DataLoader(
+            train_dataset,
+            batch_size=args.logistic_batch_size,
+            shuffle=True,
+            drop_last=True,
+            num_workers=args.workers,
+        )
 
-    # Data loaders for each split
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=args.logistic_batch_size,
-        shuffle=True,
-        drop_last=True,
-        num_workers=args.workers
-    )
+    val_loader = torch.utils.data.DataLoader(
+            val_dataset,
+            batch_size=args.logistic_batch_size,
+            shuffle=False,
+            drop_last=True,
+            num_workers=args.workers,
+        )
 
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=args.logistic_batch_size,
-        shuffle=False,
-        drop_last=True,
-        num_workers=args.workers
-    )
-
-    test_loader = DataLoader(
-        test_dataset,
-        batch_size=args.logistic_batch_size,
-        shuffle=False,
-        drop_last=True,
-        num_workers=args.workers
-    )
-
+    test_loader = torch.utils.data.DataLoader(
+            test_dataset,
+            batch_size=args.logistic_batch_size,
+            shuffle=False,
+            drop_last=True,
+            num_workers=args.workers,
+        )
+    
     # Initialize the model
     num_classes = len(train_dataset.classes)
     model = ResNet50LogisticRegression(num_classes=num_classes)
@@ -207,7 +266,7 @@ if __name__ == '__main__':
 
     # Define the number of epochs and checkpoint path
     num_epochs = 100
-    checkpoint_path = "models/resnet_log_model.pth"
+    checkpoint_path = "resnet_finetuned.pth"
 
     # Start the main training loop with train, validation, and test loaders
     main_training_loop(
