@@ -37,13 +37,21 @@ def inference(loader, simclr_model, device):
     return feature_vector, labels_vector
 
 
-def get_features(simclr_model, train_loader, test_loader, device):
+def get_features(simclr_model, train_loader, test_loader, val_loader, device):
     train_X, train_y = inference(train_loader, simclr_model, device)
     test_X, test_y = inference(test_loader, simclr_model, device)
-    return train_X, train_y, test_X, test_y
+    
+    if val_loader:
+        train_X, train_y = inference(train_loader, simclr_model, device)
+        test_X, test_y = inference(test_loader, simclr_model, device)
+        val_X, val_y = inference(val_loader, simclr_model, device)
+
+        return train_X, train_y, test_X, test_y, val_X, val_y
+    else:   
+        return train_X, train_y, test_X, test_y
 
 
-def create_data_loaders_from_arrays(X_train, y_train, X_test, y_test, batch_size):
+def create_data_loaders_from_arrays(X_train, y_train, X_test, y_test, X_val, y_val, batch_size):
     train = torch.utils.data.TensorDataset(
         torch.from_numpy(X_train), torch.from_numpy(y_train)
     )
@@ -57,7 +65,19 @@ def create_data_loaders_from_arrays(X_train, y_train, X_test, y_test, batch_size
     test_loader = torch.utils.data.DataLoader(
         test, batch_size=batch_size, shuffle=False
     )
-    return train_loader, test_loader
+    
+    if X_val:
+        val = torch.utils.data.TensorDataset(
+        torch.from_numpy(X_val), torch.from_numpy(y_val)
+    )
+        val_loader = torch.utils.data.DataLoader(
+            val, batch_size=batch_size, shuffle=False
+        )
+
+        return train_loader, test_loader, val_loader
+    
+    else:
+        return train_loader, test_loader
 
 
 def train(args, loader, simclr_model, model, criterion, optimizer):
@@ -147,23 +167,43 @@ if __name__ == "__main__":
         )
     elif args.dataset == 'FISH':
         train_dataset = ImageMaskDataset(
-                bucket_name = args.bucket_name, 
+                bucket_name = args.bucket_name,
                 image_size=args.image_size,
                 train=True,
+                unlabeled=False,
                 transform = TransformsSimCLR(size=args.image_size).test_transform)
-            
-        test_dataset = ImageMaskDataset(
-                bucket_name = args.bucket_name, 
+
+        val_dataset = ImageMaskDataset(
+                bucket_name = args.bucket_name,
                 image_size=args.image_size,
+                unlabeled=False,
                 train=False,
+                test=False,
+                transform = TransformsSimCLR(size=args.image_size).test_transform)
+
+        test_dataset = ImageMaskDataset(
+                bucket_name = args.bucket_name,
+                image_size=args.image_size,
+                unlabeled=False,
+                train=False,
+                test=True,
                 transform = TransformsSimCLR(size=args.image_size).test_transform)
     else:
-            raise NotImplementedError
+        raise NotImplementedError
+
 
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
         batch_size=args.logistic_batch_size,
         shuffle=True,
+        drop_last=True,
+        num_workers=args.workers,
+    )
+
+    val_loader = torch.utils.data.DataLoader(
+        val_dataset,
+        batch_size=args.logistic_batch_size,
+        shuffle=False,
         drop_last=True,
         num_workers=args.workers,
     )
@@ -187,7 +227,7 @@ if __name__ == "__main__":
     simclr_model.eval()
 
     ## Logistic Regression
-    n_classes = 10  # CIFAR-10 / STL-10
+    n_classes = 9  # FISH
     model = LogisticRegression(simclr_model.n_features, n_classes)
     model = model.to(args.device)
 
@@ -195,26 +235,37 @@ if __name__ == "__main__":
     criterion = torch.nn.CrossEntropyLoss()
 
     print("### Creating features from pre-trained context model ###")
-    (train_X, train_y, test_X, test_y) = get_features(
-        simclr_model, train_loader, test_loader, args.device
-    )
+    if args.dataset == 'STL10' or args.dataset == 'CIFAR10':
+        (train_X, train_y, test_X, test_y) = get_features(
+            simclr_model=simclr_model, train_loader=train_loader, test_loader=test_loader, device=args.device
+        )
 
-    arr_train_loader, arr_test_loader = create_data_loaders_from_arrays(
-        train_X, train_y, test_X, test_y, args.logistic_batch_size
-    )
+        arr_train_loader, arr_test_loader = create_data_loaders_from_arrays(
+            X_train=train_X, y_train=train_y, X_test=test_X, y_test=test_y, device = args.logistic_batch_size
+        )
 
-    for epoch in range(args.logistic_epochs):
-        loss_epoch, accuracy_epoch = train(
-            args, arr_train_loader, simclr_model, model, criterion, optimizer
+        for epoch in range(args.logistic_epochs):
+            loss_epoch, accuracy_epoch = train(
+                args, arr_train_loader, simclr_model, model, criterion, optimizer
+            )
+            print(
+                f"Epoch [{epoch}/{args.logistic_epochs}]\t Loss: {loss_epoch / len(arr_train_loader)}\t Accuracy: {accuracy_epoch / len(arr_train_loader)}"
+            )
+
+        # final testing
+        loss_epoch, accuracy_epoch = test(
+            args, arr_test_loader, simclr_model, model, criterion, optimizer
         )
         print(
-            f"Epoch [{epoch}/{args.logistic_epochs}]\t Loss: {loss_epoch / len(arr_train_loader)}\t Accuracy: {accuracy_epoch / len(arr_train_loader)}"
+            f"[FINAL]\t Loss: {loss_epoch / len(arr_test_loader)}\t Accuracy: {accuracy_epoch / len(arr_test_loader)}"
         )
 
-    # final testing
-    loss_epoch, accuracy_epoch = test(
-        args, arr_test_loader, simclr_model, model, criterion, optimizer
-    )
-    print(
-        f"[FINAL]\t Loss: {loss_epoch / len(arr_test_loader)}\t Accuracy: {accuracy_epoch / len(arr_test_loader)}"
-    )
+    elif args.dataset == 'FISH':
+        (train_X, train_y, test_X, test_y, val_X, val_y) = get_features(
+            simclr_model=simclr_model, train_loader=train_loader, test_loader=test_loader, 
+            val_loader=val_loader, device=args.device)
+        
+        arr_train_loader, arr_test_loader, arr_val_loader = create_data_loaders_from_arrays(
+            X_train=train_X, y_train=train_y, X_test=test_X, y_test=test_y, 
+            X_val= val_X, y_val=val_y, device = args.logistic_batch_size
+        )

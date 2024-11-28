@@ -37,3 +37,5 @@ logistic_epochs: 500
 bucket_name : 'fish-dataset-cl'
 bucket_prefix : 'data'
 
+model_extension : '.pth'
+
