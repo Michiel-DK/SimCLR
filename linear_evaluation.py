@@ -80,33 +80,65 @@ def create_data_loaders_from_arrays(X_train, y_train, X_test, y_test, X_val, y_v
         return train_loader, test_loader
 
 
-def train(args, loader, simclr_model, model, criterion, optimizer):
-    loss_epoch = 0
-    accuracy_epoch = 0
-    for step, (x, y) in enumerate(loader):
-        optimizer.zero_grad()
+def train(args, train_loader, val_loader, model, criterion, optimizer):
+    for epoch in range(args.epochs):
+        model.train()
+        loss_epoch = 0
+        accuracy_epoch = 0
 
-        x = x.to(args.device)
-        y = y.to(args.device)
+        for step, (x, y) in enumerate(train_loader):
+            optimizer.zero_grad()
 
-        output = model(x)
-        loss = criterion(output, y)
+            x = x.to(args.device)
+            y = y.to(args.device)
 
-        predicted = output.argmax(1)
-        acc = (predicted == y).sum().item() / y.size(0)
-        accuracy_epoch += acc
+            output = model(x)
+            loss = criterion(output, y)
 
-        loss.backward()
-        optimizer.step()
+            predicted = output.argmax(1)
+            acc = (predicted == y).sum().item() / y.size(0)
+            accuracy_epoch += acc
 
-        loss_epoch += loss.item()
-        # if step % 100 == 0:
-        #     print(
-        #         f"Step [{step}/{len(loader)}]\t Loss: {loss.item()}\t Accuracy: {acc}"
-        #     )
+            loss.backward()
+            optimizer.step()
 
-    return loss_epoch, accuracy_epoch
+            loss_epoch += loss.item()
 
+        # Average metrics over batches
+        loss_epoch /= len(train_loader)
+        accuracy_epoch /= len(train_loader)
+
+        # Validation step
+        val_loss, val_accuracy = validate(val_loader, model, criterion, args.device)
+
+        print(
+            f"Epoch [{epoch+1}/{args.epochs}]\t"
+            f"Train Loss: {loss_epoch:.4f}\t Train Accuracy: {accuracy_epoch:.4f}\t"
+            f"Val Loss: {val_loss:.4f}\t Val Accuracy: {val_accuracy:.4f}"
+        )
+
+def validate(loader, model, criterion, device):
+    model.eval()  # Set model to evaluation mode
+    val_loss = 0
+    val_accuracy = 0
+
+    with torch.no_grad():
+        for x, y in loader:
+            x = x.to(device)
+            y = y.to(device)
+
+            output = model(x)
+            loss = criterion(output, y)
+
+            predicted = output.argmax(1)
+            acc = (predicted == y).sum().item() / y.size(0)
+
+            val_loss += loss.item()
+            val_accuracy += acc
+
+    val_loss /= len(loader)
+    val_accuracy /= len(loader)
+    return val_loss, val_accuracy
 
 def test(args, loader, simclr_model, model, criterion, optimizer):
     loss_epoch = 0
@@ -268,4 +300,28 @@ if __name__ == "__main__":
         arr_train_loader, arr_test_loader, arr_val_loader = create_data_loaders_from_arrays(
             X_train=train_X, y_train=train_y, X_test=test_X, y_test=test_y, 
             X_val= val_X, y_val=val_y, device = args.logistic_batch_size
+        )
+        
+        for epoch in range(args.logistic_epochs):
+            # Training step
+            loss_epoch, accuracy_epoch = train(
+                args, arr_train_loader, simclr_model, model, criterion, optimizer
+            )
+
+            # Validation step
+            val_loss, val_accuracy = validate(arr_val_loader, model, criterion, args.device)
+
+            # Logging training and validation metrics
+            print(
+                f"Epoch [{epoch+1}/{args.logistic_epochs}]\t"
+                f"Train Loss: {loss_epoch / len(arr_train_loader):.4f}\t Train Accuracy: {accuracy_epoch / len(arr_train_loader):.4f}\t"
+                f"Val Loss: {val_loss:.4f}\t Val Accuracy: {val_accuracy:.4f}"
+            )
+
+        # Final testing
+        loss_epoch, accuracy_epoch = test(
+            args, arr_test_loader, simclr_model, model, criterion, optimizer
+        )
+        print(
+            f"[FINAL]\t Loss: {loss_epoch / len(arr_test_loader):.4f}\t Accuracy: {accuracy_epoch / len(arr_test_loader):.4f}"
         )
