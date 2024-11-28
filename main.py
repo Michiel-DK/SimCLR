@@ -22,6 +22,7 @@ from simclr.modules.sync_batchnorm import convert_model
 from model import load_optimizer, save_model
 from utils import yaml_config_hook
 
+from simclr.modules.dataloader_transform import ImageMaskDataset
 
 def train(args, train_loader, model, criterion, optimizer, writer):
     loss_epoch = 0
@@ -64,30 +65,38 @@ def main(gpu, args):
     np.random.seed(args.seed)
 
     if args.dataset == "STL10":
-        train_dataset = torchvision.datasets.STL10(
+        pre_train_dataset = torchvision.datasets.STL10(
             args.dataset_dir,
             split="unlabeled",
             download=True,
             transform=TransformsSimCLR(size=args.image_size),
         )
     elif args.dataset == "CIFAR10":
-        train_dataset = torchvision.datasets.CIFAR10(
+        pre_train_dataset = torchvision.datasets.CIFAR10(
             args.dataset_dir,
             download=True,
             transform=TransformsSimCLR(size=args.image_size),
         )
+    elif args.dataset == 'FISH':
+        pre_train_dataset = ImageMaskDataset(
+                bucket_name = args.bucket_name,
+                image_size=args.image_size,
+                unlabeled_split_percentage = 0.5,
+                unlabeled=True,
+                download=True,
+                transform = TransformsSimCLR(size=args.image_size))
     else:
         raise NotImplementedError
 
     if args.nodes > 1:
         train_sampler = torch.utils.data.distributed.DistributedSampler(
-            train_dataset, num_replicas=args.world_size, rank=rank, shuffle=True
+            pre_train_dataset, num_replicas=args.world_size, rank=rank, shuffle=True
         )
     else:
         train_sampler = None
 
     train_loader = torch.utils.data.DataLoader(
-        train_dataset,
+        pre_train_dataset,
         batch_size=args.batch_size,
         shuffle=(train_sampler is None),
         drop_last=True,
@@ -102,9 +111,15 @@ def main(gpu, args):
     # initialize model
     model = SimCLR(encoder, args.projection_dim, n_features)
     if args.reload:
-        model_fp = os.path.join(
-            args.model_path, "checkpoint_{}.tar".format(args.epoch_num)
-        )
+        if args.model_extension == '.tar':
+            model_fp = os.path.join(
+                args.model_path, "checkpoint_{}.tar".format(args.epoch_num)
+            )
+        elif args.model_extenstion == '.pth':
+            model_fp = os.path.join(
+        args.model_path, "checkpoint_{}.pth".format(args.epoch_num)
+            )
+            
         model.load_state_dict(torch.load(model_fp, map_location=args.device.type))
     model = model.to(args.device)
 
@@ -170,7 +185,7 @@ if __name__ == "__main__":
     if not os.path.exists(args.model_path):
         os.makedirs(args.model_path)
 
-    args.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    args.device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
     args.num_gpus = torch.cuda.device_count()
     args.world_size = args.gpus * args.nodes
 
