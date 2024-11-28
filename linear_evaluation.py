@@ -11,6 +11,8 @@ from simclr.modules.transformations import TransformsSimCLR
 from simclr.modules.fish_dataset import ImageMaskDataset
 from simclr.modules.early_stopping import EarlyStopping
 
+from model import load_optimizer
+
 from utils import yaml_config_hook
 
 
@@ -81,7 +83,7 @@ def create_data_loaders_from_arrays(X_train, y_train, X_test, y_test, X_val, y_v
         return train_loader, test_loader
 
 
-def train(args, train_loader, val_loader, model, criterion, optimizer):
+def train(args, train_loader, val_loader, model, criterion, optimizer, scheduler):
     for epoch in range(args.epochs):
         model.train()
         loss_epoch = 0
@@ -112,10 +114,14 @@ def train(args, train_loader, val_loader, model, criterion, optimizer):
         # Validation step
         val_loss, val_accuracy = validate(val_loader, model, criterion, args.device)
 
+        # Step the scheduler
+        scheduler.step(val_loss)
+
         print(
             f"Epoch [{epoch+1}/{args.epochs}]\t"
             f"Train Loss: {loss_epoch:.4f}\t Train Accuracy: {accuracy_epoch:.4f}\t"
-            f"Val Loss: {val_loss:.4f}\t Val Accuracy: {val_accuracy:.4f}"
+            f"Val Loss: {val_loss:.4f}\t Val Accuracy: {val_accuracy:.4f}\t"
+            f"LR: {scheduler.optimizer.param_groups[0]['lr']:.6f}"
         )
 
 def validate(loader, model, criterion, device):
@@ -254,7 +260,8 @@ if __name__ == "__main__":
 
     # load pre-trained model from checkpoint
     simclr_model = SimCLR(encoder, args.projection_dim, n_features)
-    model_fp = os.path.join(args.model_path, "checkpoint_{}.tar".format(args.epoch_num))
+    #model_fp = os.path.join(args.model_path, "checkpoint_{}.tar".format(args.epoch_num))
+    model_fp = 'models/contrastive_epoch50_finetuned.pth'
     simclr_model.load_state_dict(torch.load(model_fp, map_location=args.device.type))
     simclr_model = simclr_model.to(args.device)
     simclr_model.eval()
@@ -264,7 +271,8 @@ if __name__ == "__main__":
     model = LogisticRegression(simclr_model.n_features, n_classes)
     model = model.to(args.device)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=3e-4)
+    #optimizer = torch.optim.Adam(model.parameters(), lr=3e-4)
+    optimizer, scheduler = load_optimizer(args, model)
     criterion = torch.nn.CrossEntropyLoss()
 
     print("### Creating features from pre-trained context model ###")
@@ -311,7 +319,7 @@ if __name__ == "__main__":
         for epoch in range(args.logistic_epochs):
             # Training step
             loss_epoch, accuracy_epoch = train(
-                args, arr_train_loader, simclr_model, model, criterion, optimizer
+                args, arr_train_loader, simclr_model, model, criterion, optimizer, scheduler
             )
 
             # Validation step
