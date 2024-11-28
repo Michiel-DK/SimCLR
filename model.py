@@ -10,6 +10,16 @@ def load_optimizer(args, model):
     scheduler = None
     if args.optimizer == "Adam":
         optimizer = torch.optim.Adam(model.parameters(), lr=3e-4)  # TODO: LARS
+        
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            mode="min",  # Change to "max" if tracking accuracy or similar metrics
+            factor=0.1,  # Reduce learning rate by this factor
+            patience=10,  # Number of epochs to wait before reducing LR
+            verbose=True,  # Print messages when LR is reduced
+            min_lr=1e-6,  # Minimum learning rate
+        )
+        
     elif args.optimizer == "LARS":
         # optimized using LARS with linear learning rate scaling
         # (i.e. LearningRate = 0.3 × BatchSize/256) and weight decay of 10−6.

@@ -11,3 +11,4 @@ data_tar/
 .python-version
 models/
 data_processed/
+*pth

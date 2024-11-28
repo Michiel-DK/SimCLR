@@ -8,7 +8,7 @@ dataset_dir: "./datasets"
 
 # train options
 seed: 42 # sacred handles automatic seeding when passed in the config
-batch_size: 64
+batch_size: 256
 image_size: 224
 start_epoch: 0
 epochs: 100
@@ -17,7 +17,7 @@ train_dataset : 'FISH'
 pretrain: True 
 
 # model options
-resnet: "resnet18"
+resnet: "resnet50"
 projection_dim: 64 # "[...] to project the representation to a 128-dimensional latent space"
 
 # loss options
@@ -31,8 +31,9 @@ epoch_num: 100 # set to checkpoint number
 reload: False
 
 # logistic regression options
-logistic_batch_size: 256
+logistic_batch_size: 64
 logistic_epochs: 500
+logistic_patience: 5
 
 bucket_name : 'fish-dataset-cl'
 bucket_prefix : 'data'
