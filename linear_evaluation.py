@@ -9,6 +9,7 @@ from simclr import SimCLR
 from simclr.modules import LogisticRegression, get_resnet
 from simclr.modules.transformations import TransformsSimCLR
 from simclr.modules.fish_dataset import ImageMaskDataset
+from simclr.modules.early_stopping import EarlyStopping
 
 from utils import yaml_config_hook
 
@@ -169,7 +170,7 @@ if __name__ == "__main__":
         parser.add_argument(f"--{k}", default=v, type=type(v))
 
     args = parser.parse_args()
-    args.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    args.device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
 
     if args.dataset == "STL10":
         train_dataset = torchvision.datasets.STL10(
@@ -299,9 +300,14 @@ if __name__ == "__main__":
         
         arr_train_loader, arr_test_loader, arr_val_loader = create_data_loaders_from_arrays(
             X_train=train_X, y_train=train_y, X_test=test_X, y_test=test_y, 
-            X_val= val_X, y_val=val_y, device = args.logistic_batch_size
+            X_val=val_X, y_val=val_y, device=args.logistic_batch_size
         )
         
+        # Initialize EarlyStopping
+        early_stopping = EarlyStopping(patience=args.logistic_patience, verbose=True)
+
+        best_val_loss = float('inf')
+
         for epoch in range(args.logistic_epochs):
             # Training step
             loss_epoch, accuracy_epoch = train(
@@ -311,12 +317,28 @@ if __name__ == "__main__":
             # Validation step
             val_loss, val_accuracy = validate(arr_val_loader, model, criterion, args.device)
 
+            # Check for improvement in validation loss using EarlyStopping
+            early_stopping(val_loss)
+
+            # Save the best model
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                torch.save(model.state_dict(), "logistic_finetuned.pth")
+
             # Logging training and validation metrics
             print(
                 f"Epoch [{epoch+1}/{args.logistic_epochs}]\t"
                 f"Train Loss: {loss_epoch / len(arr_train_loader):.4f}\t Train Accuracy: {accuracy_epoch / len(arr_train_loader):.4f}\t"
                 f"Val Loss: {val_loss:.4f}\t Val Accuracy: {val_accuracy:.4f}"
             )
+
+            # Check for early stopping
+            if early_stopping.early_stop:
+                print(f"Early stopping triggered at epoch {epoch+1}.")
+                break
+
+        # Load the best model for final testing
+        model.load_state_dict(torch.load("logistic_finetuned.pth"))
 
         # Final testing
         loss_epoch, accuracy_epoch = test(
@@ -325,3 +347,4 @@ if __name__ == "__main__":
         print(
             f"[FINAL]\t Loss: {loss_epoch / len(arr_test_loader):.4f}\t Accuracy: {accuracy_epoch / len(arr_test_loader):.4f}"
         )
+
