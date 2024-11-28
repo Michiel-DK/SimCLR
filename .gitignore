@@ -9,3 +9,5 @@ simclr.egg-info
 lightning_logs/
 data_tar/
 .python-version
+models/
+data_processed/

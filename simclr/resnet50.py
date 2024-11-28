@@ -73,13 +73,14 @@ def train(model, train_loader, criterion, optimizer, device):
     return avg_loss
 
 # Evaluation function
-def evaluate(model, test_loader, criterion, device):
+# Evaluation function
+def evaluate(model, loader, criterion, device, split_name="Validation"):
     model.eval()
     running_loss = 0.0
     correct = 0
     total = 0
     with torch.no_grad():
-        for inputs, labels in tqdm(test_loader, desc="Evaluating"):
+        for inputs, labels in tqdm(loader, desc=f"Evaluating {split_name}"):
             inputs, labels = inputs.to(device), labels.to(device)
 
             # Forward pass
@@ -93,9 +94,9 @@ def evaluate(model, test_loader, criterion, device):
 
             running_loss += loss.item()
 
-    avg_loss = running_loss / len(test_loader)
+    avg_loss = running_loss / len(loader)
     accuracy = 100 * correct / total
-    print(f"Test Loss: {avg_loss:.4f}, Accuracy: {accuracy:.2f}%")
+    print(f"{split_name} Loss: {avg_loss:.4f}, Accuracy: {accuracy:.2f}%")
     return avg_loss, accuracy
 
 # Main training loop with model saving
