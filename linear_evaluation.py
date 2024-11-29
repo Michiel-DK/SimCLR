@@ -10,11 +10,13 @@ from simclr.modules import LogisticRegression, get_resnet
 from simclr.modules.transformations import TransformsSimCLR
 from simclr.modules.dataloader_transform import ImageMaskDataset
 from simclr.modules.early_stopping import EarlyStopping
+from simclr.modules.utils import check_duplicates
 
 from model import load_optimizer
 
 from utils import yaml_config_hook
 
+import sys
 
 def inference(loader, simclr_model, device):
     feature_vector = []
@@ -237,6 +239,7 @@ if __name__ == "__main__":
                     image_size=args.image_size,
                     train=True,
                     unlabeled=False,
+                    unlabeled_split_percentage=0.90,
                     transform = TransformsSimCLR(size=args.image_size).test_transform)
 
             val_dataset = ImageMaskDataset(
@@ -245,6 +248,7 @@ if __name__ == "__main__":
                     unlabeled=False,
                     train=False,
                     test=False,
+                    unlabeled_split_percentage=0.90,
                     transform = TransformsSimCLR(size=args.image_size).test_transform)
 
             test_dataset = ImageMaskDataset(
@@ -253,11 +257,11 @@ if __name__ == "__main__":
                     unlabeled=False,
                     train=False,
                     test=True,
+                    unlabeled_split_percentage=0.90,
                     transform = TransformsSimCLR(size=args.image_size).test_transform)
         else:
             raise NotImplementedError
 
-        assert set(train_dataset).isdisjoint(set(val_dataset)), "Train and validation sets overlap!"
 
         train_loader = torch.utils.data.DataLoader(
             train_dataset,
@@ -283,7 +287,7 @@ if __name__ == "__main__":
             num_workers=args.workers,
         )
 
-        encoder = get_resnet(args.resnet, pretrained=False)
+        encoder = get_resnet(args.resnet, pretrained=True)
         n_features = encoder.fc.in_features  # get dimensions of fc layer
 
         # load pre-trained model from checkpoint
@@ -334,11 +338,23 @@ if __name__ == "__main__":
             (train_X, train_y, test_X, test_y, val_X, val_y) = get_features(
                 simclr_model=simclr_model, train_loader=train_loader, test_loader=test_loader, 
                 val_loader=val_loader, device=args.device)
-            
+
             arr_train_loader, arr_test_loader, arr_val_loader = create_data_loaders_from_arrays(
                 X_train=train_X, y_train=train_y, X_test=test_X, y_test=test_y, 
                 X_val=val_X, y_val=val_y, batch_size=args.logistic_batch_size
             )
+            
+            if (
+                check_duplicates(train_X, test_X) or
+                check_duplicates(val_X, test_X) or
+                check_duplicates(train_X, val_X)
+                    ):
+                print("Terminating script due to duplicates.")
+                import ipdb;ipdb.set_trace()
+                sys.exit(1)  # Exit script with an error code
+            else:
+                print("No duplicates found. Proceeding with the script...")
+                pass
             
             # EarlyStopping and best_val_loss initialization
         early_stopping = EarlyStopping(patience=args.logistic_patience, verbose=True)

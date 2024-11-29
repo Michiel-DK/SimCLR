@@ -12,3 +12,4 @@ data_tar/
 models/
 data_processed/
 *pth
+data_no_dupli/
