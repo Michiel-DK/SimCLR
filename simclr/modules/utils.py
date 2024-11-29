@@ -12,8 +12,8 @@ def check_duplicates(array1, array2):
         bool: True if there are duplicates, False otherwise.
     """
     
-    set1 = set(array1.flatten())
-    set2 = set(array2.flatten())
+    set1 = set(map(tuple, array1))
+    set2 = set(map(tuple, array2))
     
     # Check for duplicates
     duplicates = set1.intersection(set2)

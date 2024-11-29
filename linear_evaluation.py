@@ -350,6 +350,7 @@ if __name__ == "__main__":
                 check_duplicates(train_X, val_X)
                     ):
                 print("Terminating script due to duplicates.")
+                import ipdb;ipdb.set_trace()
                 sys.exit(1)  # Exit script with an error code
             else:
                 print("No duplicates found. Proceeding with the script...")
