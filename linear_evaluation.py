@@ -9,7 +9,7 @@ from simclr import SimCLR
 from simclr.modules import LogisticRegression, get_resnet
 from simclr.modules.transformations import TransformsSimCLR
 from simclr.modules.dataloader_transform import ImageMaskDataset
-from simclr.modules.early_stopping import EarlyStopping
+from simclr.modules.early_stopping import EarlyStoppingSimCLR
 from simclr.modules.utils import check_duplicates
 
 from model import load_optimizer
@@ -17,6 +17,8 @@ from model import load_optimizer
 from utils import yaml_config_hook
 
 import sys
+
+import wandb
 
 def inference(loader, simclr_model, device):
     feature_vector = []
@@ -203,7 +205,7 @@ def full_flow(args):
                     image_size=args.image_size,
                     train=True,
                     unlabeled=False,
-                    unlabeled_split_percentage=0.90,
+                    unlabeled_split_percentage=args.unlabeled_split_percentage,
                     transform = TransformsSimCLR(size=args.image_size).test_transform)
 
             val_dataset = ImageMaskDataset(
@@ -212,7 +214,7 @@ def full_flow(args):
                     unlabeled=False,
                     train=False,
                     test=False,
-                    unlabeled_split_percentage=0.90,
+                    unlabeled_split_percentage=args.unlabeled_split_percentage,
                     transform = TransformsSimCLR(size=args.image_size).test_transform)
 
             test_dataset = ImageMaskDataset(
@@ -278,7 +280,7 @@ def full_flow(args):
                 simclr_model=simclr_model, train_loader=train_loader, test_loader=test_loader, device=args.device
             )
 
-            arr_train_loader, arr_test_loader = create_data_loaders_from_arrays(
+            arr_train_loader, arr_val_loader, arr_test_loader = create_data_loaders_from_arrays(
                 X_train=train_X, y_train=train_y, X_test=test_X, y_test=test_y, batch_size= args.logistic_batch_size
             )
 
@@ -303,25 +305,31 @@ def full_flow(args):
                 simclr_model=simclr_model, train_loader=train_loader, test_loader=test_loader, 
                 val_loader=val_loader, device=args.device)
 
-            arr_train_loader, arr_test_loader, arr_val_loader = create_data_loaders_from_arrays(
+            arr_train_loader, arr_val_loader, arr_test_loader = create_data_loaders_from_arrays(
                 X_train=train_X, y_train=train_y, X_test=test_X, y_test=test_y, 
                 X_val=val_X, y_val=val_y, batch_size=args.logistic_batch_size
             )
             
-            if (
-                check_duplicates(train_X, test_X) or
-                check_duplicates(val_X, test_X) or
-                check_duplicates(train_X, val_X)
-                    ):
-                print("Terminating script due to duplicates.")
-                import ipdb;ipdb.set_trace()
-                sys.exit(1)  # Exit script with an error code
-            else:
-                print("No duplicates found. Proceeding with the script...")
-                pass
+            wandb.config.update({
+                    "train_dataset_shape": train_X.shape,
+                    "val_dataset_shape": val_X.shape,
+                    "test_dataset_shape": test_X.shape
+                })
+            
+            # if (
+            #     check_duplicates(train_X, test_X) or
+            #     check_duplicates(val_X, test_X) or
+            #     check_duplicates(train_X, val_X)
+            #         ):
+            #     print("Terminating script due to duplicates.")
+            #     import ipdb;ipdb.set_trace()
+            #     sys.exit(1)  # Exit script with an error code
+            # else:
+            #     print("No duplicates found. Proceeding with the script...")
+            #     pass
             
             # EarlyStopping and best_val_loss initialization
-        early_stopping = EarlyStopping(patience=args.logistic_patience, verbose=True)
+        early_stopping = EarlyStoppingSimCLR(patience=args.logistic_patience, verbose=True)
         best_val_loss = float('inf')
 
         # Main epoch loop
@@ -333,6 +341,14 @@ def full_flow(args):
 
             # Validation step
             val_loss, val_accuracy = validate(arr_val_loader, model, criterion, args.device)
+            
+            wandb.log({
+                "epoch": epoch + 1,
+                "train_loss": train_loss,
+                "train_accuracy": train_accuracy,
+                "val_loss": val_loss,
+                "val_accuracy": val_accuracy
+            })
 
             # Check early stopping
             early_stopping(val_loss)
@@ -355,13 +371,25 @@ def full_flow(args):
 
         # Load the best model for final testing
         model.load_state_dict(torch.load("logistic_finetuned.pth"))
+        
+        # Optionally log the model checkpoint as an artifact
+        artifact = wandb.Artifact("logistic_finetuned", type="model")
+        artifact.add_file("logistic_finetuned.pth")
+        wandb.log_artifact(artifact)
 
         # Final testing
-        loss_epoch, accuracy_epoch = test(
+        test_loss, test_accuracy = test(
             args, arr_test_loader, simclr_model, model, criterion, optimizer
         )
+        
+        # Log final test metrics
+        wandb.log({
+            "test_loss": test_loss,
+            "test_accuracy": test_accuracy
+        })
+        
         print(
-            f"[FINAL]\t Loss: {loss_epoch / len(arr_test_loader):.4f}\t Accuracy: {accuracy_epoch / len(arr_test_loader):.4f}"
+            f"[FINAL]\t Loss: {test_loss:.4f}\t Accuracy: {test_accuracy:.4f}"
         )
 
 def test_flow(args):
@@ -423,6 +451,8 @@ def test_flow(args):
             )
         
         import ipdb;ipdb.set_trace()
+        
+        print(sub_dir, loss_epoch, accuracy_epoch)
             
 if __name__ == "__main__":
     try:
@@ -434,9 +464,15 @@ if __name__ == "__main__":
         args = parser.parse_args()
         args.device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
         
-        args.unlabeled_split_percentage = 0.90
+        args.unlabeled_split_percentage = 0.5
+        
+        wandb.init(
+            project="SimCLR_FISH",
+            config=vars(args)
+        )
                 
-        test_flow(args)
+        full_flow(args)        
+        #test_flow(args)
         
     except Exception as e:
             import ipdb, traceback, sys
