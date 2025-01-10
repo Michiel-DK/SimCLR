@@ -12,7 +12,7 @@ from simclr.modules.transformations.simclr import *
 
 
 class ImageMaskDataset(VisionDataset):
-    def __init__(self, bucket_name, train=True, split_percentage=0.7, validation_split_percentage=0.2, unlabeled_split_percentage=0.5, seed=42, transform=None, unlabeled=False, test=False, image_size=224, tar_prefix='data_tar/fish_data.tar.gz', download=False):
+    def __init__(self, bucket_name, train=True, split_percentage=0.7, validation_split_percentage=0.15, unlabeled_split_percentage=0.5, seed=42, transform=None, unlabeled=False, test=False, image_size=224, tar_prefix='data_tar/fish_data.tar.gz', download=False):
         super(ImageMaskDataset, self).__init__(root='data_tar/', transform=transform)
         
         self.train = train

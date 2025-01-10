@@ -311,9 +311,13 @@ def full_flow(args):
             )
             
             wandb.config.update({
-                    "train_dataset_shape": train_X.shape,
-                    "val_dataset_shape": val_X.shape,
-                    "test_dataset_shape": test_X.shape
+                    "train_dataset_shape": train_X.shape[0],
+                    "val_dataset_shape": val_X.shape[0],
+                    "test_dataset_shape": test_X.shape[0]
+                })
+
+            wandb.log({
+                    "train_dataset_shape": train_X.shape[0],
                 })
             
             # if (
@@ -360,7 +364,7 @@ def full_flow(args):
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 print(f"Model saved at epoch {epoch+1}")
-                torch.save(model.state_dict(), "logistic_finetuned.pth")
+                torch.save(model.state_dict(), args.model_name)
 
             # Logging
             print(
@@ -370,11 +374,11 @@ def full_flow(args):
             )
 
         # Load the best model for final testing
-        model.load_state_dict(torch.load("logistic_finetuned.pth"))
+        model.load_state_dict(torch.load(args.model_name))
         
         # Optionally log the model checkpoint as an artifact
-        artifact = wandb.Artifact("logistic_finetuned", type="model")
-        artifact.add_file("logistic_finetuned.pth")
+        artifact = wandb.Artifact(args.model_name, type="model")
+        artifact.add_file(args.model_name)
         wandb.log_artifact(artifact)
 
         # Final testing
@@ -384,12 +388,12 @@ def full_flow(args):
         
         # Log final test metrics
         wandb.log({
-            "test_loss": test_loss,
-            "test_accuracy": test_accuracy
+            "test_loss": test_loss/ len(arr_test_loader),
+            "test_accuracy": test_accuracy/ len(arr_test_loader)
         })
         
         print(
-            f"[FINAL]\t Loss: {test_loss:.4f}\t Accuracy: {test_accuracy:.4f}"
+            f"[FINAL]\t Loss: {test_loss/ len(arr_test_loader):.4f}\t Accuracy: {test_accuracy/ len(arr_test_loader):.4f}"
         )
 
 def test_flow(args):
@@ -449,9 +453,7 @@ def test_flow(args):
         loss_epoch, accuracy_epoch = test(
                 args, arr_test_loader, simclr_model, model, criterion, optimizer
             )
-        
-        import ipdb;ipdb.set_trace()
-        
+                
         print(sub_dir, loss_epoch, accuracy_epoch)
             
 if __name__ == "__main__":
@@ -466,8 +468,11 @@ if __name__ == "__main__":
         
         args.unlabeled_split_percentage = 0.5
         
+        args.model_name = f'{str(args.unlabeled_split_percentage).split(".")[-1]}0_percent_finetuned.pth'
+        
         wandb.init(
             project="SimCLR_FISH",
+            group="finetuned_simclr",
             config=vars(args)
         )
                 
