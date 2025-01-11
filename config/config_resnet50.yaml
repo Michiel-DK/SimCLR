@@ -1,0 +1,24 @@
+# distributed training
+nodes: 1
+gpus: 1 # I recommend always assigning 1 GPU to 1 node
+nr: 0 # machine nr. in node (0 -- nodes - 1)
+dataparallel: 0 # Use DataParallel instead of DistributedDataParallel
+workers: 0
+dataset_dir: "./datasets"
+
+# train options
+seed: 42 # sacred handles automatic seeding when passed in the config
+image_size: 224
+dataset: "FISH" # STL10
+train_dataset : 'FISH'
+pretrain: True 
+
+# logistic regression options
+logistic_batch_size: 64
+logistic_epochs: 500
+logistic_patience: 5
+
+bucket_name : 'fish-dataset-cl'
+bucket_prefix : 'data'
+
+model_extension : '.pth'

@@ -466,7 +466,7 @@ if __name__ == "__main__":
         args = parser.parse_args()
         args.device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
         
-        args.unlabeled_split_percentage = 0.5
+        args.unlabeled_split_percentage = 0.9
         
         args.model_name = f'{str(args.unlabeled_split_percentage).split(".")[-1]}0_percent_finetuned.pth'
         

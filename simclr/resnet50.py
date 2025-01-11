@@ -11,6 +11,11 @@ import os
 from simclr.modules.transformations import TransformsSimCLR
 from simclr.modules.early_stopping import EarlyStopping, save_checkpoint, load_checkpoint
 
+import argparse
+from utils import yaml_config_hook
+
+import wandb
+
 
 args = get_args()
 
@@ -117,14 +122,14 @@ def main_training_loop(model, train_loader, val_loader, test_loader, criterion, 
 
 
 
-if __name__ == '__main__':
+def full_flow(args):
     
     train_dataset = ImageMaskDataset(
                     bucket_name = args.bucket_name,
                     image_size=args.image_size,
                     train=True,
                     unlabeled=False,
-                    unlabeled_split_percentage=0.9,
+                    unlabeled_split_percentage=args.unlabeled_split_percentage,
                     transform = TransformsSimCLR(size=args.image_size).test_transform)
 
     val_dataset = ImageMaskDataset(
@@ -133,7 +138,7 @@ if __name__ == '__main__':
                     unlabeled=False,
                     train=False,
                     test=False,
-                    unlabeled_split_percentage=0.9,
+                    unlabeled_split_percentage=args.unlabeled_split_percentage,
                     transform = TransformsSimCLR(size=args.image_size).test_transform)
 
     test_dataset = ImageMaskDataset(
@@ -142,7 +147,7 @@ if __name__ == '__main__':
                     unlabeled=False,
                     train=False,
                     test=True,
-                    unlabeled_split_percentage=0.9,
+                    unlabeled_split_percentage=args.unlabeled_split_percentage,
                     transform = TransformsSimCLR(size=args.image_size).test_transform)
     
     train_loader = torch.utils.data.DataLoader(
@@ -191,8 +196,8 @@ if __name__ == '__main__':
     )
 
     # Define the number of epochs and checkpoint path
-    num_epochs = 100
-    checkpoint_path = "resnet_finetuned.pth"
+    num_epochs = args.logistic_epochs
+    checkpoint_path = args.model_name
 
     # Start the main training loop with train, validation, and test loaders
     main_training_loop(
@@ -208,3 +213,32 @@ if __name__ == '__main__':
         checkpoint_path
     )
 
+
+if __name__ == '__main__':
+    
+    try:
+        parser = argparse.ArgumentParser(description="SimCLR")
+        config = yaml_config_hook("./config/config_resnet50.yaml")
+        for k, v in config.items():
+            parser.add_argument(f"--{k}", default=v, type=type(v))
+
+        args = parser.parse_args()
+        args.device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+        
+        args.unlabeled_split_percentage = 0.5
+        
+        args.model_name = f'{str(args.unlabeled_split_percentage).split(".")[-1]}0_percent_resnet50.pth'
+        
+        wandb.init(
+            project="SimCLR_FISH",
+            group="finetuned_resnet50",
+            config=vars(args)
+        )
+                
+        full_flow(args)        
+        
+    except Exception as e:
+            import ipdb, traceback, sys
+            extype, value, tb = sys.exc_info()
+            traceback.print_exc()
+            ipdb.post_mortem(tb)     
