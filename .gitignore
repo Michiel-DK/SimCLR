@@ -13,3 +13,4 @@ models/
 data_processed/
 *pth
 data_no_dupli/
+wandb/
