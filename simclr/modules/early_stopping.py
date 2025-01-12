@@ -26,7 +26,7 @@ class EarlyStoppingSimCLR:
                 self.early_stop = True
 
 class EarlyStopping:
-    def __init__(self, patience=10, delta=1e-4, path='checkpoint.pth', verbose=False):
+    def __init__(self, patience=10, delta=1e-3, path='checkpoint.pth', verbose=False):
         """
         Args:
             patience (int): How long to wait after last time validation loss improved.
