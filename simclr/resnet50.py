@@ -85,7 +85,7 @@ def main_training_loop(model, train_loader, val_loader, test_loader, criterion, 
     start_epoch = 0
 
     # Initialize early stopping
-    early_stopping = EarlyStopping(patience=10, delta=1e-4, path=checkpoint_path, verbose=True)
+    early_stopping = EarlyStopping(patience=5, delta=1e-3, path=checkpoint_path, verbose=True)
 
     # Load checkpoint if available
     model, optimizer, scheduler, start_epoch, _ = load_checkpoint(checkpoint_path, model, optimizer, scheduler)
@@ -114,11 +114,20 @@ def main_training_loop(model, train_loader, val_loader, test_loader, criterion, 
 
     # Load the best model from early stopping checkpoint
     model, optimizer, scheduler, _, _ = load_checkpoint(checkpoint_path, model, optimizer, scheduler)
+    
+    artifact = wandb.Artifact(args.model_name, type="model")
+    artifact.add_file(args.model_name)
+    wandb.log_artifact(artifact)
 
     # Test phase after training completes
     print("Evaluating on Test Set:")
     test_loss, test_accuracy = evaluate(model, test_loader, criterion, device, split_name="Test")
-    print(f"Test Loss: {test_loss:.4f}, Test Accuracy: {test_accuracy:.2f}%")
+    print(f"Test Loss: {test_loss:.4f}, Test Accuracy: {test_accuracy/100:.2f}%")
+    
+    wandb.log({
+            "test_loss": test_loss,
+            "test_accuracy": test_accuracy/100
+        })
 
 
 
@@ -174,6 +183,16 @@ def full_flow(args):
             num_workers=args.workers,
         )
     
+    wandb.config.update({
+                    "train_dataset_shape": len(train_dataset),
+                    "val_dataset_shape": len(val_dataset),
+                    "test_dataset_shape": len(test_dataset)
+                })
+
+    wandb.log({
+                    "train_dataset_shape": len(train_dataset),
+                })
+    
     # Initialize the model
     num_classes = len(train_dataset.classes)
     model = ResNet50LogisticRegression(num_classes=num_classes)
@@ -225,7 +244,7 @@ if __name__ == '__main__':
         args = parser.parse_args()
         args.device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
         
-        args.unlabeled_split_percentage = 0.5
+        args.unlabeled_split_percentage = 0.9
         
         args.model_name = f'{str(args.unlabeled_split_percentage).split(".")[-1]}0_percent_resnet50.pth'
         
